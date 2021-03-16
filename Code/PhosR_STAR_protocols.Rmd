@@ -1,0 +1,249 @@
+---
+title: "PhosR STAR protocols"
+author: "Hani Kim"
+date: "09/03/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Step 1: Installing PhosR
+Install PhosR by running the following code:
+```{r}
+if(!require(devtools)){ 
+ install.packages("devtools") # If not already installed 
+}
+
+devtools::install_github("PYangLab/PhosR", 
+                         build_opts = c("--no-resave-data", "--no-manual"), 
+                         build_vignettes = TRUE)
+
+library(PhosR)
+```
+
+Whilst this STAR protocol provides an in-depth step-by-step tutorial for running PhosR with tips and suggestions, you can browse through the streamlined version of the vignette by running the following code. 
+```{r}
+utils::browseVignettes("PhosR")
+```
+
+```{r}
+suppressPackageStartupMessages(library(SummarizedExperiment))
+```
+
+# Step 2: Creating the PhosphoExperiment Object
+```{r}
+# Load dataset
+load("../Data/PXD001792_raw_hepatocyte.RData", verbose = TRUE)
+
+# Extract the columns of interests before start 
+samples = colnames(PXD001792_raw_hepatocyte)
+PXD001792_raw_hepatocyte <- PXD001792_raw_hepatocyte[,c(grep("_Control_\\d$", samples),
+                                                        grep("_Ins_\\d$", samples))]
+PXD001792_raw_hepatocyte = PXD001792_raw_hepatocyte[, sort(colnames(PXD001792_raw_hepatocyte))]
+
+# Create PhosphoExperiment Object
+ppe <- PhosR::PhosphoExperiment(assays = list(Quantification = as.matrix(PXD001792_raw_hepatocyte)))
+
+# Add site annotations to PhosphoExperiment object
+splitSites = strsplit(rownames(ppe), "~")
+GeneSymbol <- toupper(as.character(sapply(splitSites, function(x) x[[2]])))
+Residue <- as.character(gsub("[0-9]", "", sapply(splitSites, function(x) x[[3]])))
+Site <- as.numeric(gsub("[STY]","",sapply(splitSites, function(x) x[[3]])))
+Sequence <- as.character(sapply(splitSites, function(x) x[[4]]))
+
+ppe@GeneSymbol <- GeneSymbol
+ppe@Residue <- Residue
+ppe@Site <- Site
+ppe@Sequence <- Sequence
+
+# Alternatively, we can create PhosphoExperiment object as following
+ppe <- PhosR::PhosphoExperiment(assays = list(Quantification = as.matrix(PXD001792_raw_hepatocyte)), Site = Site, GeneSymbol = GeneSymbol, Residue = Residue, Sequence = Sequence)
+
+# Lastly add colData information
+sample_name = strsplit(gsub("^Intensity.", "", colnames(ppe)), "_")
+
+colData(ppe) = S4Vectors::DataFrame(
+    cellline = sapply(sample_name, "[[", 1),
+    condition = sapply(sample_name, "[[", 2),
+    replicate = sapply(sample_name, "[[", 3)
+)
+
+# Have a quick glance of the object
+ppe
+dim(ppe)
+```
+
+# Step 3: Data pre-processing
+```{r}
+# Log transformation
+logmat = log2(assay(ppe, "Quantification"))
+logmat[is.infinite(logmat)] = NA
+assay(ppe, "Quantification") = logmat
+
+# Filtering using function `selectGrps`
+grps <- paste0(colData(ppe)$cellline, "_", colData(ppe)$condition)
+ppe <- selectGrps(ppe, grps, 0.5, n=1)
+dim(ppe)
+
+# Imputation
+set.seed(123)
+ppe <- scImpute(ppe, 0.5, grps)
+ppe
+
+ppe[,1:6] <- ptImpute(ppe[,7:12], ppe[,1:6], 0.6, 0, paired = FALSE, assay = "imputed")
+ppe[,13:18] <- ptImpute(ppe[,19:24], ppe[,13:18], 0.6, 0, paired = FALSE, assay = "imputed")
+
+ppe <- tImpute(ppe, assay = "imputed")
+ppe <- medianScaling(ppe, scale = FALSE, assay = "imputed")
+ppe
+
+# taking ratio
+FL83B.ratio <- assay(ppe, "scaled")[, grep("FL83B_", colnames(ppe))] - 
+rowMeans(assay(ppe, "scaled")[,grep("FL83B_Control", colnames(ppe))])
+Hepa.ratio <- assay(ppe, "scaled")[, grep("Hepa1.6_", colnames(ppe))] - 
+rowMeans(assay(ppe, "scaled")[,grep("Hepa1.6_Control", 
+colnames(ppe))])
+assay(ppe, "scaled")<- cbind(FL83B.ratio, Hepa.ratio)
+
+assay(ppe, "scaled")
+# we will now save this fully processed matrix for use later
+PXD001792_ppe_hepatocyte = ppe 
+#save(PXD001792_ppe_hepatocyte, file = "../Data/PXD001792_ppe_hepatocyte.RData") ##### check this is the same
+```
+
+
+# Step 4: identifying stably phosphorylated sites
+```{r}
+# Load datasets
+load("../Data/PXD010621_ppe_ESC.RData", verbose = TRUE) #phospho.ESC.ratio.pe
+load("../Data/PXD003631_ppe_adipocyte.RData", verbose = TRUE) # phospho.L1.FGF21.ratio.pe
+load("../Data/phospho_ppe_adipocyte.RData", verbose = TRUE) # phospho.L1.Ins.ratio.subset.pe.RData
+
+# Simplify names of datasets
+ppe1 <- PXD010621_ppe_ESC
+ppe2 <- PXD003631_ppe_adipocyte
+ppe3 <- phospho_ppe_adipocyte
+
+# Make a list of all PhosphoExperiment objects
+ppe.list <- list(ppe1, ppe2, ppe3)
+
+# Make a vector of the selected assays in each of the PhosphoExperiment objects
+assays <- rep("Quantification", 3)
+
+# Make a list of grouping information of each dataset
+cond.list <- list(
+    grp1 = gsub("_.+", "", colnames(ppe1)),
+    grp2 = gsub("_r[0-9]", "", colnames(ppe2)),
+    grp3 = colnames(ppe3))
+
+# Identifying SPSs by calling getSPS()
+inhouse_SPSs <- getSPS(ppe.list, assays = assays, conds = cond.list, residueInfo = TRUE)
+```
+
+# Step 4: normalising and batch correction
+```{r}
+# Load quantification matrix of phosphoproteomic data
+load("../Data/PXD019127_ratio_myoblast.RData", verbose = TRUE)
+ppe <- PhosphoExperiment(assays = list(Quantification = as.matrix(PXD019127_ratio_myoblast)))
+
+rowNames = strsplit(rownames(ppe), "~")
+
+ppe@GeneSymbol <- toupper(sapply(rowNames, "[[", 2))
+ppe@Residue <- gsub("[0-9]","", sapply(rowNames, "[[", 3))
+ppe@Site <- as.numeric(gsub("[A-Z]","", sapply(rowNames, "[[", 3)))
+ppe@Sequence <- sapply(rowNames, "[[", 4)
+
+# Generate colData
+sample_name = strsplit(colnames(ppe), "_")
+colData(ppe) = S4Vectors::DataFrame(
+    condition = sapply(sample_name, "[[", 1),
+    replicate = gsub("exp", "", sapply(sample_name, "[[", 2))
+)
+
+# diagnosing batch effect
+plotQC(assay(ppe,"Quantification"), panel = "dendrogram", grps = colData(ppe)$condition, labels = colnames(ppe)) + ggplot2::ggtitle("before batch correction")
+plotQC(assay(ppe,"Quantification"), panel = "pca", grps = colData(ppe)$condition, labels = colnames(ppe)) + ggplot2::ggtitle("before batch correction")
+
+# correcting batch effect
+design = model.matrix(~ colData(ppe)$condition - 1)
+head(design) # observe first 6 rows of the design matrix
+sites = paste(
+    sapply(ppe@GeneSymbol, function(x)x), ";", 
+    sapply(ppe@Residue, function(x)x), 
+    sapply(ppe@Site, function(x)x), ";", 
+    sep = ""
+)
+data(SPSs)
+ctl = which(sites %in% SPSs)
+
+# Run RUV
+ppe = RUVphospho(ppe, M = design, k = 3, ctl = ctl)
+
+# QC
+# plot after batch correction
+p1 = plotQC(assay(ppe,"Quantification"), grps=colData(ppe)$condition, labels = colnames(ppe), panel = "dendrogram")
+p2 = plotQC(assay(ppe,"normalised"), grps=colData(ppe)$condition, labels = colnames(ppe), panel="dendrogram")
+ggpubr::ggarrange(p1, p2, nrow = 1)
+
+p1 = plotQC(assay(ppe,"Quantification"), panel = "pca", grps=colData(ppe)$condition, labels = colnames(ppe)) +
+  ggplot2::ggtitle("Before Batch correction")
+p2 = plotQC(assay(ppe,"normalised"), grps=colData(ppe)$condition, labels = colnames(ppe), panel="pca") +
+  ggplot2::ggtitle("After Batch correction")
+ggpubr::ggarrange(p1, p2, nrow = 2)
+
+# save data
+PXD019127_ppe_myoblast = ppe
+save(PXD019127_ppe_myoblast, file = "../Data/PXD019127_ppe_myoblast.RData")
+```
+
+# Step 5: predicting kinase substrates
+```{r}
+load("../Data/PXD019127_ppe_myoblast.RData", verbose = TRUE)
+ppe = PXD019127_ppe_myoblast
+mat = SummarizedExperiment::assay(ppe, "normalised")
+
+mat.mean <- meanAbundance(mat, grps = colData(ppe)$condition)
+aov <- matANOVA(mat=mat, grps=colData(ppe)$condition)
+idx <- (aov < 0.05) & (rowSums(mat.mean > 0.5) > 0)
+mat.reg <- mat[idx, ,drop = FALSE]
+
+mat.std <- PhosR::standardise(mat.reg)
+#rownames(mat.std) <- paste0(ppe@GeneSymbol, ";", ppe@Residue, ppe@Site, ";")[idx]
+rownames(mat.std) <- sapply(strsplit(rownames(mat.std), "~"), function(x){gsub(" ", "", paste(toupper(x[2]), x[3], "", sep=";"))})
+
+data("KinaseMotifs")
+seqs <- ppe@Sequence[idx]
+kssMat <- kinaseSubstrateScore(substrate.list = PhosphoSite.mouse, 
+                               mat = mat.std, seqs = seqs,
+                               numMotif = 5, numSub = 1)
+```
+
+```{r}
+set.seed(1)
+predMat <- kinaseSubstratePred(kssMat, top = 30)
+colnames(predMat)
+```
+
+```{r}
+kinaseOI = c("AKT1")
+signalomesRes <- Signalomes(KSR = kssMat, 
+                            predMatrix = predMat, 
+                            exprsMat = mat.std, 
+                            module_res = 5,
+                            KOI = kinaseOI)
+```
+
+```{r}
+### generate palette
+my_color_palette <- grDevices::colorRampPalette(RColorBrewer::brewer.pal(8, "Accent"))
+kinase_all_color <- my_color_palette(ncol(kssMat$combinedScoreMatrix))
+names(kinase_all_color) <- colnames(kssMat$combinedScoreMatrix)
+kinase_signalome_color <- kinase_all_color[colnames(predMat)]
+
+plotSignalomeMap(signalomes = signalomesRes, color = kinase_signalome_color)
+
+plotKinaseNetwork(KSR = kssMat, predMatrix = predMat, threshold = 0.95, color = kinase_all_color)
+```
+
