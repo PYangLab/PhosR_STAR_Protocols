@@ -1,13 +1,25 @@
 ---
-title: "PhosR STAR protocols"
-author: "Hani Kim"
-date: "09/03/2021"
-output: html_document
+title: 'Protocol for the Processing and Downstream Analysis of Phosphoproteomics Data with PhosR'
+author:
+- name: Hani Jieun Kim, Taiyun, Di Xiao and Pengyi Yang
+  affiliation:
+  - School of Mathematics and Statistics, The University of Sydney
+  - Computational Systems Biology Group, Children’s Medical Research Institute, Faculty of Medicine and Health, The University of Sydney
+  - Charles Perkins Centre, The University of Sydney
+
+output:
+  BiocStyle::html_document:
+    toc_float: true
+package: BiocStyle
+vignette: >
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
+# Introduction
 
 # Step 1: Installing PhosR
 Install PhosR by running the following code:
@@ -16,16 +28,15 @@ if(!require(devtools)){
  install.packages("devtools") # If not already installed 
 }
 
-devtools::install_github("PYangLab/PhosR", 
-                         build_opts = c("--no-resave-data", "--no-manual"), 
-                         build_vignettes = TRUE)
-
+#devtools::install_github("PYangLab/PhosR", 
+#                         build_opts = c("--no-resave-data", "--no-manual"), 
+#                         build_vignettes = TRUE)
 library(PhosR)
 ```
 
 Whilst this STAR protocol provides an in-depth step-by-step tutorial for running PhosR with tips and suggestions, you can browse through the streamlined version of the vignette by running the following code. 
 ```{r}
-utils::browseVignettes("PhosR")
+#utils::browseVignettes("PhosR")
 ```
 
 ```{r}
@@ -64,11 +75,13 @@ ppe <- PhosR::PhosphoExperiment(assays = list(Quantification = as.matrix(PXD0017
 # Lastly add colData information
 sample_name = strsplit(gsub("^Intensity.", "", colnames(ppe)), "_")
 
-colData(ppe) = S4Vectors::DataFrame(
+df = S4Vectors::DataFrame(
     cellline = sapply(sample_name, "[[", 1),
     condition = sapply(sample_name, "[[", 2),
     replicate = sapply(sample_name, "[[", 3)
 )
+rownames(df) = colnames(ppe)
+colData(ppe) = df
 
 # Have a quick glance of the object
 ppe
@@ -105,9 +118,8 @@ rowMeans(assay(ppe, "scaled")[,grep("FL83B_Control", colnames(ppe))])
 Hepa.ratio <- assay(ppe, "scaled")[, grep("Hepa1.6_", colnames(ppe))] - 
 rowMeans(assay(ppe, "scaled")[,grep("Hepa1.6_Control", 
 colnames(ppe))])
-assay(ppe, "scaled")<- cbind(FL83B.ratio, Hepa.ratio)
+assay(ppe, "scaled") <- cbind(FL83B.ratio, Hepa.ratio)
 
-assay(ppe, "scaled")
 # we will now save this fully processed matrix for use later
 PXD001792_ppe_hepatocyte = ppe 
 #save(PXD001792_ppe_hepatocyte, file = "../Data/PXD001792_ppe_hepatocyte.RData") ##### check this is the same
@@ -117,9 +129,9 @@ PXD001792_ppe_hepatocyte = ppe
 # Step 4: identifying stably phosphorylated sites
 ```{r}
 # Load datasets
-load("../Data/PXD010621_ppe_ESC.RData", verbose = TRUE) #phospho.ESC.ratio.pe
-load("../Data/PXD003631_ppe_adipocyte.RData", verbose = TRUE) # phospho.L1.FGF21.ratio.pe
-load("../Data/phospho_ppe_adipocyte.RData", verbose = TRUE) # phospho.L1.Ins.ratio.subset.pe.RData
+load("../Data/PXD010621_ppe_ESC.RData", verbose = TRUE) 
+load("../Data/PXD003631_ppe_adipocyte.RData", verbose = TRUE)
+load("../Data/phospho_ppe_adipocyte.RData", verbose = TRUE) 
 
 # Simplify names of datasets
 ppe1 <- PXD010621_ppe_ESC
@@ -130,7 +142,7 @@ ppe3 <- phospho_ppe_adipocyte
 ppe.list <- list(ppe1, ppe2, ppe3)
 
 # Make a vector of the selected assays in each of the PhosphoExperiment objects
-assays <- rep("Quantification", 3)
+assays <- "Quantification"
 
 # Make a list of grouping information of each dataset
 cond.list <- list(
@@ -139,10 +151,10 @@ cond.list <- list(
     grp3 = colnames(ppe3))
 
 # Identifying SPSs by calling getSPS()
-inhouse_SPSs <- getSPS(ppe.list, assays = assays, conds = cond.list, residueInfo = TRUE)
+inhouse_SPSs <- getSPS(ppe.list, assays = assays, conds = cond.list)
 ```
 
-# Step 4: normalising and batch correction
+# Step 5: Normalisation and Batch Correction of Datasets
 ```{r}
 # Load quantification matrix of phosphoproteomic data
 load("../Data/PXD019127_ratio_myoblast.RData", verbose = TRUE)
@@ -157,10 +169,12 @@ ppe@Sequence <- sapply(rowNames, "[[", 4)
 
 # Generate colData
 sample_name = strsplit(colnames(ppe), "_")
-colData(ppe) = S4Vectors::DataFrame(
+df = S4Vectors::DataFrame(
     condition = sapply(sample_name, "[[", 1),
     replicate = gsub("exp", "", sapply(sample_name, "[[", 2))
 )
+rownames(df) = colnames(ppe)
+colData(ppe) = df
 
 # diagnosing batch effect
 plotQC(assay(ppe,"Quantification"), panel = "dendrogram", grps = colData(ppe)$condition, labels = colnames(ppe)) + ggplot2::ggtitle("before batch correction")
@@ -195,10 +209,10 @@ ggpubr::ggarrange(p1, p2, nrow = 2)
 
 # save data
 PXD019127_ppe_myoblast = ppe
-save(PXD019127_ppe_myoblast, file = "../Data/PXD019127_ppe_myoblast.RData")
+#save(PXD019127_ppe_myoblast, file = "../Data/PXD019127_ppe_myoblast.RData")
 ```
 
-# Step 5: predicting kinase substrates
+# Step 6: Predicting Kinase Substrates
 ```{r}
 load("../Data/PXD019127_ppe_myoblast.RData", verbose = TRUE)
 ppe = PXD019127_ppe_myoblast
@@ -210,7 +224,6 @@ idx <- (aov < 0.05) & (rowSums(mat.mean > 0.5) > 0)
 mat.reg <- mat[idx, ,drop = FALSE]
 
 mat.std <- PhosR::standardise(mat.reg)
-#rownames(mat.std) <- paste0(ppe@GeneSymbol, ";", ppe@Residue, ppe@Site, ";")[idx]
 rownames(mat.std) <- sapply(strsplit(rownames(mat.std), "~"), function(x){gsub(" ", "", paste(toupper(x[2]), x[3], "", sep=";"))})
 
 data("KinaseMotifs")
@@ -225,13 +238,13 @@ set.seed(1)
 predMat <- kinaseSubstratePred(kssMat, top = 30)
 colnames(predMat)
 ```
-
+# Step 7: Constructing Signalling Networks (Signalomes)
 ```{r}
 kinaseOI = c("AKT1")
 signalomesRes <- Signalomes(KSR = kssMat, 
                             predMatrix = predMat, 
                             exprsMat = mat.std, 
-                            module_res = 5,
+                            module_res = 6,
                             KOI = kinaseOI)
 ```
 
@@ -245,5 +258,10 @@ kinase_signalome_color <- kinase_all_color[colnames(predMat)]
 plotSignalomeMap(signalomes = signalomesRes, color = kinase_signalome_color)
 
 plotKinaseNetwork(KSR = kssMat, predMatrix = predMat, threshold = 0.95, color = kinase_all_color)
+```
+
+# Session Info
+```{r}
+sessioninfo::session_info()
 ```
 
