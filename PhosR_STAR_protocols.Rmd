@@ -43,7 +43,7 @@ Whilst this STAR protocol provides an in-depth step-by-step tutorial for running
 #utils::browseVignettes("PhosR")
 ```
 
-*Note* that all the necessary data needed to reproducible the code can be downloaded from [here](https://github.com/PYangLab/PhosR_STAR_Protocols).
+*Note* that all the necessary data needed to reproduce the code can be downloaded from [here](https://github.com/PYangLab/PhosR_STAR_Protocols).
 
 ## Step 2: Creating the PhosphoExperiment Object
 To increase the usability of PhosR functions, we implement a “PhosphoExperiment” (ppe) object based on the “SummarizedExperiment” class. To create the PhosphoExperiment object, you will be required to provide a quantification matrix where columns refer to samples and rows refer to phosphosites. Additional annotation labels for phosphosites should be provided alongside the matrix, including the phosphosite residue and position, “sequence window” that captures the amino acids flanking the phosphorylation sites, and the official gene symbol of the host protein in capital letters. Here, we will show the basic steps for generating a PhosphoExperiment object for an exemplar phosphoproteomic data from two liver cell lines, FL83B and Hep 1-6 cells (Humphrey et al., 2015). Briefly, this dataset contains the phosphoproteomic quantifications of mouse hepatocyte cell lines that were treated with either PBS (mock) or insulin. Each condition includes six biological replicates. 
