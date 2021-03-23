@@ -23,7 +23,7 @@ knitr::opts_chunk$set(echo = TRUE)
 # Step-by-Step Method Details
 
 ## Step 1: Installing PhosR
-Full installation of PhosR includes downloading the PhosR package from GitHub or BioConductor. To use the latest developmental version of PhosR, install from GitHub. Whilst this STAR protocol provides an in-depth step-by-step tutorial for running PhosR with tips and suggestions, you can browse through the streamlined version of the [vignette](https://pyanglab.github.io/PhosR/index.html) with the associated code to reproduce the findings from our original [publication](https://www.sciencedirect.com/science/article/pii/S221112472100084X).
+Full installation of PhosR includes downloading the PhosR package from GitHub or BioConductor. To use the latest developmental version of PhosR, install from GitHub. 
 
 Install PhosR by running the following code:
 ```{r message = FALSE}
@@ -34,8 +34,14 @@ if(!require(devtools)){
 #devtools::install_github("PYangLab/PhosR", 
 #                        build_opts = c("--no-resave-data", "--no-manual"), 
 #                        build_vignettes=TRUE, 
-#                        dependencies = TRUE)  TRUE)
+#                        dependencies =  TRUE)
 library(PhosR)
+```
+CRITICAL: To install all dependencies, you will need to update to the latest version of R. 
+
+Whilst this STAR protocol provides an in-depth step-by-step tutorial for running PhosR with tips and suggestions, you can browse through the streamlined version of the [vignette](https://pyanglab.github.io/PhosR/index.html) with the associated code to reproduce the findings from our original [publication](https://www.sciencedirect.com/science/article/pii/S221112472100084X).
+```{r}
+#utils::browseVignettes("PhosR")
 ```
 
 We will also need to load the SummarizedExperiment package. 
