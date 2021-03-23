@@ -10,7 +10,6 @@ author:
 output:
   BiocStyle::html_document:
     toc_float: true
-package: BiocStyle
 vignette: >
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
@@ -42,11 +41,6 @@ CRITICAL: To install all dependencies, you will need to update to the latest ver
 Whilst this STAR protocol provides an in-depth step-by-step tutorial for running PhosR with tips and suggestions, you can browse through the streamlined version of the [vignette](https://pyanglab.github.io/PhosR/index.html) with the associated code to reproduce the findings from our original [publication](https://www.sciencedirect.com/science/article/pii/S221112472100084X).
 ```{r}
 #utils::browseVignettes("PhosR")
-```
-
-We will also need to load the SummarizedExperiment package. 
-```{r}
-suppressPackageStartupMessages(library(SummarizedExperiment))
 ```
 
 *Note* that all the necessary data needed to reproducible the code can be downloaded from [here](https://github.com/PYangLab/PhosR_STAR_Protocols).
@@ -103,7 +97,7 @@ df = S4Vectors::DataFrame(
     replicate = sapply(sample_name, "[[", 3)
 )
 rownames(df) = colnames(ppe)
-colData(ppe) = df
+SummarizedExperiment::colData(ppe) = df
 ```
 
 Have a quick glance of the object
@@ -117,14 +111,16 @@ The presence of missing values in quantitative phosphoproteomics reduces the com
 
 Log transformation
 ```{r}
-logmat = log2(assay(ppe, "Quantification"))
+logmat = log2(SummarizedExperiment::assay(ppe, "Quantification"))
 logmat[is.infinite(logmat)] = NA
-assay(ppe, "Quantification") = logmat
+SummarizedExperiment::assay(ppe, "Quantification") = logmat
 ```
 
 Filtering using function `selectGrps`
 ```{r}
-grps <- paste0(colData(ppe)$cellline, "_", colData(ppe)$condition)
+grps <- paste0(SummarizedExperiment::colData(ppe)$cellline, 
+               "_", 
+               SummarizedExperiment::colData(ppe)$condition)
 ppe <- selectGrps(ppe, grps, 0.5, n=1)
 dim(ppe)
 ```
@@ -152,12 +148,12 @@ The scaled quantification matrix can be found as the ‘scaled’ matrix in the 
 
 After imputation, we take the ratios for each of the two cell lines
 ```{r}
-FL83B.ratio <- assay(ppe, "scaled")[, grep("FL83B_", colnames(ppe))] - 
-rowMeans(assay(ppe, "scaled")[,grep("FL83B_Control", colnames(ppe))])
-Hepa.ratio <- assay(ppe, "scaled")[, grep("Hepa1.6_", colnames(ppe))] - 
-rowMeans(assay(ppe, "scaled")[,grep("Hepa1.6_Control", 
+FL83B.ratio <- SummarizedExperiment::assay(ppe, "scaled")[, grep("FL83B_", colnames(ppe))] - 
+rowMeans(SummarizedExperiment::assay(ppe, "scaled")[,grep("FL83B_Control", colnames(ppe))])
+Hepa.ratio <- SummarizedExperiment::assay(ppe, "scaled")[, grep("Hepa1.6_", colnames(ppe))] - 
+rowMeans(SummarizedExperiment::assay(ppe, "scaled")[,grep("Hepa1.6_Control", 
 colnames(ppe))])
-assay(ppe, "scaled") <- cbind(FL83B.ratio, Hepa.ratio)
+SummarizedExperiment::assay(ppe, "scaled") <- cbind(FL83B.ratio, Hepa.ratio)
 ```
 
 We will now save this fully processed matrix for use later
@@ -232,26 +228,26 @@ df = S4Vectors::DataFrame(
     replicate = gsub("exp", "", sapply(sample_name, "[[", 2))
 )
 rownames(df) = colnames(ppe)
-colData(ppe) = df
+SummarizedExperiment::colData(ppe) = df
 ```
 
 Diagnosing batch effect
 ```{r}
-plotQC(assay(ppe,"Quantification"), 
+plotQC(SummarizedExperiment::assay(ppe,"Quantification"), 
        panel = "dendrogram", 
-       grps = colData(ppe)$condition, 
+       grps = SummarizedExperiment::colData(ppe)$condition, 
        labels = colnames(ppe)) + 
   ggplot2::ggtitle("before batch correction")
-plotQC(assay(ppe,"Quantification"), 
+plotQC(SummarizedExperiment::assay(ppe,"Quantification"), 
        panel = "pca", 
-       grps = colData(ppe)$condition, 
+       grps = SummarizedExperiment::colData(ppe)$condition, 
        labels = colnames(ppe)) + 
   ggplot2::ggtitle("before batch correction")
 ```
 
 Correcting batch effect
 ```{r}
-design = model.matrix(~ colData(ppe)$condition - 1)
+design = model.matrix(~ SummarizedExperiment::colData(ppe)$condition - 1)
 head(design) # observe first 6 rows of the design matrix
 sites = paste(
     sapply(ppe@GeneSymbol, function(x)x), ";", 
@@ -269,23 +265,23 @@ ppe = RUVphospho(ppe, M = design, k = 3, ctl = ctl)
 Visualise QC plots
 ```{r}
 # plot after batch correction
-p1 = plotQC(assay(ppe,"Quantification"), 
-            grps=colData(ppe)$condition, 
+p1 = plotQC(SummarizedExperiment::assay(ppe,"Quantification"), 
+            grps = SummarizedExperiment::colData(ppe)$condition, 
             labels = colnames(ppe), 
             panel = "dendrogram")
-p2 = plotQC(assay(ppe,"normalised"), 
-            grps=colData(ppe)$condition, 
+p2 = plotQC(SummarizedExperiment::assay(ppe,"normalised"), 
+            grps = SummarizedExperiment::colData(ppe)$condition, 
             labels = colnames(ppe), 
             panel="dendrogram")
 ggpubr::ggarrange(p1, p2, nrow = 1)
 
-p1 = plotQC(assay(ppe,"Quantification"), 
+p1 = plotQC(SummarizedExperiment::assay(ppe,"Quantification"), 
             panel = "pca", 
-            grps=colData(ppe)$condition, 
+            grps = SummarizedExperiment::colData(ppe)$condition, 
             labels = colnames(ppe)) +
   ggplot2::ggtitle("Before Batch correction")
-p2 = plotQC(assay(ppe,"normalised"), 
-            grps=colData(ppe)$condition, 
+p2 = plotQC(SummarizedExperiment::assay(ppe,"normalised"), 
+            grps = SummarizedExperiment::colData(ppe)$condition, 
             labels = colnames(ppe), 
             panel="pca") +
   ggplot2::ggtitle("After Batch correction")
@@ -316,10 +312,13 @@ CRITICAL: If you have not processed your data, please go through Steps 1 to 5 to
 
 Filter for up-regulated phosphosites
 ```{r}
-mat.mean <- meanAbundance(mat, grps = colData(ppe)$condition)
-aov <- matANOVA(mat=mat, grps=colData(ppe)$condition)
+mat.mean <- meanAbundance(mat, 
+                          grps = SummarizedExperiment::colData(ppe)$condition)
+aov <- matANOVA(mat=mat, 
+                grps = SummarizedExperiment::colData(ppe)$condition)
 idx <- (aov < 0.05) & (rowSums(mat.mean > 0.5) > 0)
-mat.reg <- mat[idx, ,drop = FALSE]
+mat.reg <- mat[idx, ,
+               drop = FALSE]
 ```
 
 Standardise the matrix
