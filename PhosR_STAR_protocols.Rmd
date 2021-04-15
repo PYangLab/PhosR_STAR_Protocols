@@ -45,20 +45,24 @@ Whilst this STAR protocol provides an in-depth step-by-step tutorial for running
 
 *Note* that all the necessary data needed to reproduce the code can be downloaded from [here](https://github.com/PYangLab/PhosR_STAR_Protocols).
 
-## Step 2: Creating the PhosphoExperiment Object
-To increase the usability of PhosR functions, we implement a “PhosphoExperiment” (ppe) object based on the “SummarizedExperiment” class. To create the PhosphoExperiment object, you will be required to provide a quantification matrix where columns refer to samples and rows refer to phosphosites. Additional annotation labels for phosphosites should be provided alongside the matrix, including the phosphosite residue and position, “sequence window” that captures the amino acids flanking the phosphorylation sites, and the official gene symbol of the host protein in capital letters. Here, we will show the basic steps for generating a PhosphoExperiment object for an exemplar phosphoproteomic data from two liver cell lines, FL83B and Hep 1-6 cells (Humphrey et al., 2015). Briefly, this dataset contains the phosphoproteomic quantifications of mouse hepatocyte cell lines that were treated with either PBS (mock) or insulin. Each condition includes six biological replicates. 
+## Step 2: Processing data from a typical MaxQuant output
 
-Load the phosphoproteomic quantification matrix pre-processed.
+The very first step of the analysis of phosphoproteomics using the PhosR package is to construct a signal matrix from the output of an instrument. For demonstration purposes, we will use a subset of tab separated (txt) file of PXD001792 hepatocyte data from MaxQuant. Briefly, this dataset contains the phosphoproteomic quantifications of two mouse hepatocyte cell lines, FL83B and Hep 1-6 cells, that were treated with either PBS (mock) or insulin. Each condition includes six biological replicates (Humphrey et al., 2015).
+
 ```{r}
-# Load dataset
-load("Data/PXD001792_raw_hepatocyte.RData", verbose = TRUE)
+phospho_hepatocyte_raw <- read.delim("Data/PXD001792_raw_hepatocyte.txt", 
+                                     header = TRUE)
+# delete reverse matches and potential contaminants
+del <- which(phospho_hepatocyte_raw[,"Reverse"]=="+" | phospho_hepatocyte_raw[,"Potential.contaminant"]=="+")
+phospho_hepatocyte_clean <- phospho_hepatocyte_raw[-del,]
 
-# Extract the columns of interests before start 
-samples = colnames(PXD001792_raw_hepatocyte)
-PXD001792_raw_hepatocyte <- PXD001792_raw_hepatocyte[,c(grep("_Control_\\d$", samples),
-                                                       grep("_Ins_\\d$", samples))]
-PXD001792_raw_hepatocyte = PXD001792_raw_hepatocyte[,sort(colnames(PXD001792_raw_hepatocyte))]
+# Subset the raw data to select columns with "Intensity" values.
+PXD001792_raw_hepatocyte <- phospho_hepatocyte_clean[,grep("Intensity", colnames(phospho_hepatocyte_clean))]
 ```
+
+
+## Step 3: Creating the PhosphoExperiment Object
+To increase the usability of PhosR functions, we implement a “PhosphoExperiment” (ppe) object based on the “SummarizedExperiment” class. To create the PhosphoExperiment object, you will be required to provide a quantification matrix where columns refer to samples and rows refer to phosphosites. Additional annotation labels for phosphosites should be provided alongside the matrix, including the phosphosite residue and position, “sequence window” that captures the amino acids flanking the phosphorylation sites, and the official gene symbol of the host protein in capital letters. Here, we will show the basic steps for generating a PhosphoExperiment object using the above quantification matrix. 
 
 Create PhosphoExperiment Object
 ```{r}
@@ -67,12 +71,14 @@ ppe <- PhosR::PhosphoExperiment(assays = list(Quantification = as.matrix(PXD0017
 
 Add site annotations to PhosphoExperiment object
 ```{r}
-splitSites = strsplit(rownames(ppe), "~")
-GeneSymbol <- toupper(as.character(sapply(splitSites, function(x) x[[2]])))
-Residue <- as.character(gsub("[0-9]", "", sapply(splitSites, function(x) x[[3]])))
-Site <- as.numeric(gsub("[STY]","",sapply(splitSites, function(x) x[[3]])))
-Sequence <- as.character(sapply(splitSites, function(x) x[[4]]))
+# Extracting feature information
+GeneSymbol <- toupper(sapply(strsplit(as.character(phospho_hepatocyte_clean[,"Gene.names"]), ";"),
+                             function(x){x[1]}))
+Residue <- as.character(phospho_hepatocyte_clean[,"Amino.acid"])
+Site <- as.numeric(phospho_hepatocyte_clean[,"Position"]) 
+Sequence <- sapply(strsplit(as.character(phospho_hepatocyte_clean[,"Sequence.window"]), ";"), function(x){x[1]})
 
+### add these annotations to respective ppe slots 
 ppe@GeneSymbol <- GeneSymbol
 ppe@Residue <- Residue
 ppe@Site <- Site
@@ -81,10 +87,10 @@ ppe@Sequence <- Sequence
 
 Alternatively, we can create PhosphoExperiment object as following
 ```{r}
-ppe <- PhosR::PhosphoExperiment(assays = list(Quantification = as.matrix(PXD001792_raw_hepatocyte)), 
-                                Site = Site, 
-                                GeneSymbol = GeneSymbol, 
-                                Residue = Residue, Sequence = Sequence)
+ppe <- PhosphoExperiment(assays = list(Quantification = as.matrix(PXD001792_raw_hepatocyte)), 
+                         Site = Site, 
+                         GeneSymbol = GeneSymbol, 
+                         Residue = Residue, Sequence = Sequence)
 ```
 
 Lastly add colData information
@@ -106,7 +112,7 @@ ppe
 dim(ppe)
 ```
 
-## Step 3: Data pre-processing
+## Step 4: Data Pre-processing and Differential Phosphosite Identification
 The presence of missing values in quantitative phosphoproteomics reduces the completeness of data. Whilst imputation has been widely applied to handle missing values, it remains a major challenge when analyzing phosphoproteomic data and has significant impact on downstream analysis such as normalization. PhosR provides users with greater flexibility for imputation with imputation functions such as ‘scImpute’ and ‘tImpute’. Here, we will go through each function step by step to demonstrate their use in imputing phosphoproteomic data. 
 
 Log transformation
@@ -134,7 +140,7 @@ ppe <- scImpute(ppe, 0.5, grps)
 ppe
 ```
 
-Lastly, we can impute the remaining sites using tail-based imputation 
+Lastly, we can impute the remaining sites using tail-based imputation /
 ```{r}
 ppe <- tImpute(ppe, assay = "imputed")
 ```
@@ -146,14 +152,69 @@ ppe
 ```
 The scaled quantification matrix can be found as the ‘scaled’ matrix in the PhosphoExperiment object.
 
-After imputation, we take the ratios for each of the two cell lines
+Next, we will call differentially phosphorylated sites. We use limma package for calling for differentially phosphorylated sites.
 ```{r}
-FL83B.ratio <- SummarizedExperiment::assay(ppe, "scaled")[, grep("FL83B_", colnames(ppe))] - 
-rowMeans(SummarizedExperiment::assay(ppe, "scaled")[,grep("FL83B_Control", colnames(ppe))])
-Hepa.ratio <- SummarizedExperiment::assay(ppe, "scaled")[, grep("Hepa1.6_", colnames(ppe))] - 
-rowMeans(SummarizedExperiment::assay(ppe, "scaled")[,grep("Hepa1.6_Control", 
-colnames(ppe))])
+library(limma)
+# construct design matrix by group
+design <- model.matrix(~ grps - 1)
+# fit linear model for each phosphosite
+fit <- lmFit(ppe@assays@data$scaled, design)
+
+contrast.matrix <- makeContrasts(grpsFL83B_Ins-grpsFL83B_Control, 
+                                 grpsHepa1.6_Ins-grpsHepa1.6_Control, 
+                                 levels=design)
+fit2 <- contrasts.fit(fit, contrast.matrix)
+fit2 <- eBayes(fit2)
+```
+
+```{r}
+#Counting and visualise differentially phosphorylated sites for FL83B cells in control and insulin-simulated condition after imputation.
+## FL83B
+FL83B.a.DE <- topTable(fit2, 
+                       coef="grpsFL83B_Ins - grpsFL83B_Control", 
+                       number = Inf)
+
+plot(FL83B.a.DE[,"logFC"], -log10(FL83B.a.DE[,"P.Value"]))
+sel <- which(FL83B.a.DE[,"adj.P.Val"] < 0.05 & FL83B.a.DE[,"logFC"] > 0)
+length(sel)
+points(FL83B.a.DE[sel,"logFC"], -log10(FL83B.a.DE[sel,"P.Value"]), pch=16, col="red")
+sel <- which(FL83B.a.DE[,"adj.P.Val"] < 0.05 & FL83B.a.DE[,"logFC"] < 0)
+length(sel)
+points(FL83B.a.DE[sel,"logFC"], -log10(FL83B.a.DE[sel,"P.Value"]), pch=16, col="blue")
+
+## Hepa1.6
+Hepa1.6.a.DE <- topTable(fit2, 
+                         coef="grpsHepa1.6_Ins - grpsHepa1.6_Control", 
+                         number = Inf)
+plot(Hepa1.6.a.DE[,"logFC"], -log10(Hepa1.6.a.DE[,"P.Value"]))
+sel <- which(Hepa1.6.a.DE[,"adj.P.Val"] < 0.05 & Hepa1.6.a.DE[,"logFC"] > 0)
+length(sel)
+points(Hepa1.6.a.DE[sel,"logFC"], -log10(Hepa1.6.a.DE[sel,"P.Value"]), pch=16, col="red")
+sel <- which(Hepa1.6.a.DE[,"adj.P.Val"] < 0.05 & Hepa1.6.a.DE[,"logFC"] < 0)
+length(sel)
+points(Hepa1.6.a.DE[sel,"logFC"], -log10(Hepa1.6.a.DE[sel,"P.Value"]), pch=16, col="blue")
+```
+
+After imputation, we take the ratios for each of the two cell lines.
+```{r}
+mat = SummarizedExperiment::assay(ppe, "scaled")
+
+FL83B.ratio <- mat[, grep("FL83B_", colnames(ppe))] - rowMeans(mat[,grep("FL83B_Control", colnames(ppe))])
+Hepa.ratio <- mat[, grep("Hepa1.6_", colnames(ppe))] - rowMeans(mat[,grep("Hepa1.6_Control", colnames(ppe))])
+
 SummarizedExperiment::assay(ppe, "scaled") <- cbind(FL83B.ratio, Hepa.ratio)
+```
+
+```{r}
+par(mfrow=c(1,2))
+boxplot(ppe@assays@data$scaled, 
+        ylab="Log2 LFQ", 
+        main="Normalised LFQ data", las=2, 
+        col=factor(rep(1:4, each=6)))
+boxplot(ppe@assays@data$ratio, 
+        ylab="Log2 Fold Change", 
+        main="Ratio data", las=2, 
+        col=factor(rep(1:4, each=6)))
 ```
 
 We will now save this fully processed matrix for use later
@@ -164,7 +225,7 @@ PXD001792_ppe_hepatocyte = ppe
 
 CRITICAL: After imputation, data from label-free quantification are typically converted to ratios before subsequent analysis. In contrast to label-free data, you do not need to take ratios of phosphoproteomic data derived from SILAC quantification since the values are inherently ratios (typically with respect to the control sample). The tail-based imputation (Beck et al., 2015) is designed specifically for label-free data (such as the one used in our example) and is not applicable to SILAC data.
 
-## Step 4: identifying stably phosphorylated sites
+## Step 5: identifying stably phosphorylated sites
 Several commonly used data normalisation approaches such as the 'removal of unwanted variation” (RUV) (Gagnon-Bartsch and Speed, 2012) require a set of internal standards whose expression are known to be unchanged in the samples measured. This is a challenge for phosphoproteomic data since phosphorylation is a highly dynamic biochemical process. Identifying a set of stably phosphorylated sites (SPSs) is a unique feature of PhosR which enables users to identify context-dependent sets of SPSs. We also included a set of 100 SPSs as a resource, identified from multiple high-quality datasets generated from different cell types and experimental conditions (Kim et al., 2021). As an example, we will use three datasets to demonstrate how SPSs can be identified from multiple phosphoproteomic datasets. Users may wish to replace the example datasets with their own collection of datasets.
 
 Load datasets
@@ -197,14 +258,15 @@ Note: If inputs are not PhosphoExperiment objects, please transfer the data form
 
 Identifying SPSs by calling getSPS()
 ```{r}
-inhouse_SPSs <- getSPS(ppe.list, 
+inhouse_SPSs <- getSPS(phosData = ppe.list, 
                        assays = assays, 
-                       conds = cond.list)
+                       conds = cond.list, 
+                       num = 100)
 ```
 
 Note: Please note that presence of sufficient overlapped phosphosites identified from the input datasets is critical to identify SPSs. You will receive an error if the number of overlapped sites is fewer than 200 in at least two datasets or fewer than 1000 across all input datasets.
 
-## Step 5: Normalisation and Batch Correction of Datasets
+## Step 6: Normalisation and Batch Correction of Datasets
 A common but critical step in phosphoproteomic data analysis is to correct for batch effect. Without batch effect correction, it is often not possible to analyze datasets in an integrative manner. To perform data integration and batch effect correction, we utilise a set of stably phosphorylated sites (SPSs) across a panel of phosphoproteomic datasets (defined from Step 4) and implement normalisation using RUV-III (Molania et al., 2019). To demonstrate batch effect correction, we will perform RUVphospho to normalise a SILAC data from L6 myotubes treated with two factors: 1) AICAR, an analog of adenosine monophosphate (AMP) that stimulates AMPK activity and/or 2) insulin.
 
 CRITICAL: RUV-III requires a complete data matrix. If you have not followed through the steps above, you will need to perform imputation of the missing values. The imputed values are removed by default after normalisation but can be retained for downstream analysis if the users wish to use the imputed matrix.
@@ -297,7 +359,7 @@ PXD019127_ppe_myoblast = ppe
 
 Pause Point: This is an ideal pause point as we have generated a fully processed data. By now, you should have a good idea of the data quality and have performed the necessary processing to filter any suboptimal sites, imputed missing values (if present) and diagnosed and corrected any batch effect present in the data. 
 
-## Step 6: Predicting Kinase Substrates
+## Step 7: Predicting Kinase Substrates
 A key end-goal of phosphoproteomic data analysis is to identify kinases that are responsible for the phosphorylation of specific sites. The basic computational approach to annotate kinases to their substrates or phosphosites is to find consensus amino acid sequences around the phosphorylation site. We can go beyond this approach by considering cell type and/or treatment (perturbation) specificity of phosphorylation. PhosR implements a multi-step framework that contains two major components including (i) a kinaseSubstrateScore function which scores a given phosphosite using kinase recognition motif and phosphoproteomic dynamics, and (ii) a kinaseSubstratePred function which synthesise the scores generated from (i) for predicting kinase-substrate relationships using an adaptive sampling-based positive-unlabeled learning method (Yang et al., 2018).
 
 In the original PhosR publication, we demonstrate the application of the scoring method to the myotube phosphoproteome and uncover potential kinase-substrate pairs and global relationships between kinases. We confirm well established substrates of AMPK in our publication: ACACA S79, AKAP1 S103, SMCR8 S488 (Hoffman et al., 2015) and MTFR1L S100 (Schaffer et al., 2015). Importantly, PhosR generates a list of potential candidates not included in the PhosphoSitePlus database for validation.
@@ -354,7 +416,7 @@ colnames(predMat)
 
 Pause Point: Once the desired parameters are used to successfully run the kinase-substrate prediction, you may find this to be a good place to pause and save the results before proceeding with the visualisation steps.
 
-## Step 7: Constructing Signalling Networks (Signalomes)
+## Step 8: Constructing Signalling Networks (Signalomes)
 
 Constructing signaling networks referred to as “Signalomes” is a useful feature in PhosR that allows the users to obtain a global view of kinase regulation and to establish distinct modules of proteins that demonstrate similar kinase and dynamic regulation upon perturbation or across a time-course.
 
